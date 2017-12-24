@@ -1,0 +1,182 @@
+---
+title: "Strava"
+output: html_notebook
+---
+
+Following guidance here:
+http://www.open-thoughts.com/2017/01/the-quantified-cyclist-analysing-strava-data-using-r/
+
+
+Firstly you must must create your own application:
+
+```{r setup}
+library(tidyverse)
+library(lubridate)
+library(httr)
+library(httpuv) # not sure if we actually need this package - appears not to be used below
+library(jsonlite)
+library(padr)
+library(forcats)
+library(ggmap)
+library(stringr)
+library(rStrava)
+
+```
+
+
+
+```{r, eval=FALSE}
+my_app <- oauth_app("strava",
+  key = "17212",
+  secret = "fd99631e35362eadca8d270638db8deded46aaef"
+  )
+
+```
+
+Secondly, you need to describe an OAuth endpoint:
+
+```{r, eval=FALSE}
+my_endpoint <- oauth_endpoint(
+request = NULL,
+authorize = "https://www.strava.com/oauth/authorize",
+access = "https://www.strava.com/oauth/token"
+)
+```
+
+Finally, you need to generate an oauth2.0 token. This encapsulates the app, the endpoint and some other parameters. By default the API will only retrieve your ‘public’ activities, so the ‘view_private’ parameter is vital if you want to include activities you marked as Private (when recording my rides I tend to flag my commutes as ‘Private’ so as not to spam my followers’ timelines with my twice-daily short rides!).
+```{r, eval=FALSE}
+sig <- oauth2.0_token(my_endpoint, my_app, scope = "view_private",  type = NULL, use_oob = FALSE, as_header = FALSE,   use_basic_auth = FALSE, cache = FALSE)
+```
+
+The following code gets all your activities and returns them as a list vector.  Note that Strava requires your access_token to be sent along with each request. By default, the data returned will paginate at 30 records, but you can use the ‘per_page’ parameter to return up to 200 records, and if needed you can specify the ‘page’ parameter to request further pages.
+
+```{r}
+df = tibble(pages = c(1,2))
+
+
+dataJSON = df %>% 
+  mutate(query = sprintf("https://www.strava.com/api/v3/athlete/activities?access_token=57778ebed5940bd68be3caa7c8644101acf4dacd&per_page=200&page=%s", pages),
+         df = map(query, jsonlite::fromJSON, flatten = TRUE))
+
+df1 = dataJSON$df[[1]]
+df2 = dataJSON$df[[2]]
+
+names1 = names(df1)
+names2 = names(df2)
+
+df2 = df2[,names1] #get only columns that are in df1 (so we can rbind)
+
+data = rbind(df1,df2)
+
+
+```
+
+
+
+
+```{r}
+data = data %>% 
+  select(name:end_latlng, manual, average_speed, location_city:start_longitude, average_speed, max_speed, elev_high, elev_low, type, workout_type, map.summary_polyline) %>% 
+  mutate(
+    date = ymd_hms(start_date_local),
+    pace = (moving_time/60) / (distance/1000),
+    start_hour = hour(date),
+    name = fct_reorder(factor(name), start_hour)) %>% 
+ filter(type == "Run")    # runs only
+
+
+```
+
+```{r}
+map = get_map(location = "new zealand", zoom = 6, source = "stamen", maptype = "watercolor")
+
+ggmap(map)+
+  geom_point(data = data, aes(x = start_longitude, y = start_latitude), size = 3)
+```
+
+```{r}
+map = map_data("nz")
+ggplot() +
+  geom_polygon(data = map, aes(x=long, y = lat, group = group))+
+  #coord_fixed(1.3)+
+  geom_point(data = filter(data, start_latitude < -30), aes(x = start_longitude, y = start_latitude, colour = name))
+
+```
+
+
+```{r}
+data %>%
+  arrange(date) %>% 
+  thicken(interval = "week") %>% 
+  group_by(date_week) %>%
+  summarise(distance = sum(distance)/1000, pace = mean(pace), runs_per_week = n()) %>% 
+  ggplot( aes(x = date_week, runs_per_week, colour = pace, size = distance)) +
+  geom_point()+
+  labs(title = "runs per week", size = "kms per week", colour = 'average pace (min/km)')
+
+#ggplotly(p)
+
+```
+
+```{r}
+data %>%
+  arrange(date) %>% 
+  thicken(interval = "week") %>% 
+  group_by(date_week) %>%
+  summarise(distance = sum(distance)/1000, pace = mean(pace), runs_per_week = n()) %>% 
+  ggplot( aes(x = date_week, distance, colour = pace)) +
+  geom_point()+
+  labs(title = "kms per week")
+```
+
+
+
+
+```{r}
+input = tribble(~start_date, ~show_name,
+                "2013-01-01", TRUE)
+latest_run = data %>%
+       filter(date == max(date))
+
+ p = data %>%
+       filter(distance > 4800, distance < 6500, pace > 3, pace < 6, date > ymd(as.character(input$start_date))) %>% 
+       ggplot(aes(date, pace, size = distance))+
+       geom_smooth(show.legend = FALSE)+
+       labs(title = "Run Pace", y = "Pace (mins/km)", x = "Date",subtitle = "runs between 4.8km and 6.5km, with pace between 4min/km and 6min/km")
+     
+     if(input$show_name) {
+       p = p + geom_point(aes(colour = name))
+     } else {
+       p = p + geom_point()
+     }
+     
+     p = p + geom_point(data = latest_run, colour = 'red', size = 1, shape = 23)
+     
+     ggplotly(p)
+     
+```
+
+
+```{r}
+data %>%
+  ggplot(aes(date, start_hour, colour = factor(start_hour)))+
+  geom_jitter(height=0.1)+
+  labs(title = "start hour of the day")
+
+```
+
+```{r}
+data %>%
+  count(year(date))
+```
+```{r}
+data %>%
+  filter(year(date)==2017) %>%
+  mutate(week = floor_date(date, unit = "weeks")) %>%
+  count(week) %>% 
+  ggplot(aes(week,n))+
+  geom_col()+
+  geom_hline(aes(yintercept = mean(n)),colour = 'red')
+  
+```
+
