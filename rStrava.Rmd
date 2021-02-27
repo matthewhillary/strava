@@ -1,0 +1,115 @@
+---
+title: "rStrava_Test"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(rStrava)
+library(httr)
+library(listviewer)
+```
+
+
+
+```{r}
+
+# Old API Details
+# app_name <- 'my_app' # chosen by user
+# app_client_id  <- '17212' # an integer, assigned by Strava
+# app_secret <- 'fd99631e35362eadca8d270638db8deded46aaef' # an alphanumeric secret, assigned by Strava
+
+# New API Details
+app_name <- 'my_app'
+app_client_id <- '17212'
+app_secret <- "fd99631e35362eadca8d270638db8deded46aaef"
+access_token <- "b639229aa802219762e5c59d7962aff65b535e89"
+refresh_token <- "2dc3de0637b7bd7de2d584686204e86e0ce857fb "
+
+# create the authentication token
+
+#stoken <- httr::config(token = strava_oauth(app_name, app_client_id, app_secret, cache = TRUE))
+stoken <- httr::config(token = strava_oauth(app_name, app_client_id, app_secret, app_scope="activity:read_all"))
+#stoken <- httr::config(token = readRDS('.httr-oauth')[[1]])
+```
+```{r}
+myinfo <- get_athlete(stoken, id = '3164287')
+head(myinfo)
+
+```
+```{r}
+
+my_acts <- get_activity_list(stoken)
+
+listviewer::jsonedit(my_acts)
+```
+
+```{r}
+act_data <- compile_activities(my_acts) 
+```
+
+```{r}
+act_data %>% 
+  mutate(start_date_local = lubridate::ymd_hms(start_date_local)) %>% 
+  filter(type == "Run",
+         start_date_local> lubridate::ymd(20180101)) %>% 
+  ggplot(aes(start_date_local, distance))+
+  geom_point()+
+  labs(title = "Run Distances")
+```
+```{r}
+act_data %>% 
+  mutate(start_date_local = lubridate::ymd_hms(start_date_local)) %>% 
+  filter(type == "Run",
+         start_date_local> lubridate::ymd(20180101)) %>% 
+  mutate(week = lubridate::floor_date(start_date_local, "week")) %>% 
+  group_by(week) %>% 
+  summarise(n = n(), distance = sum(distance)) %>% 
+  ggplot(aes(week, distance))+
+  geom_point()+
+  geom_line()+
+  labs(title = "Weekly kms")
+
+```
+
+```{r}
+act_data %>% 
+  mutate(start_date_local = lubridate::ymd_hms(start_date_local)) %>% 
+  filter(type == "Run",
+         start_date_local> lubridate::ymd(20180101)) %>% 
+  mutate(month = lubridate::floor_date(start_date_local, "month")) %>% 
+  group_by(month) %>% 
+  summarise(n = n(), distance = sum(distance)) %>% 
+  ggplot(aes(month, distance))+
+  geom_col()+
+  labs(title = "Monthly kms")
+```
+
+
+```{r}
+act_data %>% 
+  mutate(start_date_local = lubridate::ymd_hms(start_date_local)) %>% 
+  filter(type == "Run",
+         start_date_local> lubridate::ymd(20140101)) %>% 
+  mutate(week = lubridate::floor_date(start_date_local, "week")) %>% 
+  group_by(week) %>% 
+  summarise(n = n(), distance = sum(distance)) %>% 
+  ggplot(aes(week, n))+
+  geom_col()+
+  labs(title = "Runs per week")
+```
+
+```{r}
+act_data %>% 
+  mutate(start_date_local = lubridate::ymd_hms(start_date_local)) %>% 
+  filter(type == "Run",
+         start_date_local> lubridate::ymd(20140101)) %>% 
+  mutate(month = lubridate::floor_date(start_date_local, "month")) %>% 
+  group_by(month) %>% 
+  summarise(n = n(), distance = sum(distance)) %>% 
+  ggplot(aes(month, n))+
+  geom_col()+
+  labs(title = "Runs per month")
+```
+
